@@ -2,13 +2,15 @@ library(shiny)
 library(shinydashboard)
 library(ggplot2)
 library(doremi)
+library(zoo)
 
 # Environment for global variables for the app
 dec_env <- new.env()
 dec_env$reactives <- reactiveValues(
-    data = NULL,
-    deconvoluted = NULL,
-    params = NULL
+    original_data = NULL, # The input data
+    data = NULL, # The data to be plotted/analysed - can be smoothed
+    deconvoluted = NULL, # The deconvoluted data
+    params = NULL # The calculated parameters
 )
 
 deconvol <- function(time, reporter, halflife) {
@@ -53,7 +55,7 @@ calculate_params <- function(time, reporter, points_initial_rate) {
     decay_rate <- NA
     decay_rate_model <- NA
 
-    # Calculate initial rate    
+    # Calculate initial rate
     model <- lm(reporter ~ time,
         data = data.frame(
             time = time[1:points_initial_rate],
@@ -118,6 +120,7 @@ ui <- dashboardPage(
         ),
         numericInput("halflife", "Reporter halflife (hours)", 3.7, step = 0.1),
         numericInput("points_initial_rate", "Number of points for initial rate", 10, step = 1),
+        checkboxInput("smooth_trace", "Smooth trace", TRUE),
         actionButton("deconvolute", "Deconvolute"),
         div(style = "margin-left: 15px;", downloadButton("download", "Download"))
     ),
@@ -132,7 +135,33 @@ server <- function(input, output) {
     observeEvent(input$input_file, {
         contents <- read.csv(input$input_file$datapath)
         dec_env$reactives$deconvoluted <- NULL # Reset deconvoluted data
-        dec_env$reactives$data <- contents
+        dec_env$reactives$original_data <- contents
+        if (input$smooth_trace) {
+            dec_env$reactives$data <- data.frame(Time = contents$Time,
+                Luminescence = rollmean(contents$Luminescence, 5, fill = NA))
+        } else {
+            dec_env$reactives$data <- contents
+        }
+    })
+
+    observeEvent(input$smooth_trace, {
+        # Update smoothed data
+        req(dec_env$reactives$original_data)
+        if (input$smooth_trace) {
+            dec_env$reactives$data <- data.frame(Time = dec_env$reactives$original_data$Time,
+                Luminescence = rollmean(dec_env$reactives$original_data$Luminescence, 5, fill = NA))                
+        } else {
+            dec_env$reactives$data <- dec_env$reactives$original_data            
+        }
+
+        # Update params, if available
+        if (!is.null(dec_env$reactives$params)) {
+            dec_env$reactives$params <- calculate_params(
+                time = dec_env$reactives$data$Time,
+                reporter = dec_env$reactives$deconvoluted()$Synthesis,
+                points_initial_rate = input$points_initial_rate
+            )
+        }
     })
 
     # Deconvolute data when "Deconvolute" button is clicked
@@ -164,14 +193,25 @@ server <- function(input, output) {
                 g <- ggplot() +
                     theme_bw()
             } else {
-                g <- ggplot(dec_env$reactives$data, aes(x = Time, y = Luminescence)) +
-                    geom_line(col = "lightgray") +
-                    labs(x = "Time (hours)", y = "Luminescence (a.u.)") +
-                    theme_bw() +
-                    theme(
-                        axis.text = element_text(size = 14),
-                        axis.title = element_text(size = 16)
-                    )
+                if (input$smooth_trace) {
+                    g <- ggplot(dec_env$reactives$data, aes(x = Time, y = Luminescence)) +
+                        geom_line(col = "lightgray") +
+                        labs(x = "Time (hours)", y = "Luminescence (a.u.)") +
+                        theme_bw() +
+                        theme(
+                            axis.text = element_text(size = 14),
+                            axis.title = element_text(size = 16)
+                        )
+                } else {
+                    g <- ggplot(dec_env$reactives$original_data, aes(x = Time, y = Luminescence)) +
+                        geom_line(col = "lightgray") +
+                        labs(x = "Time (hours)", y = "Luminescence (a.u.)") +
+                        theme_bw() +
+                        theme(
+                            axis.text = element_text(size = 14),
+                            axis.title = element_text(size = 16)
+                        )
+                }
             }
         } else {
             g <- ggplot(dec_env$reactives$deconvoluted(), aes(x = Time, y = Luminescence)) +
