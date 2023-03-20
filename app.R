@@ -61,7 +61,8 @@ calculate_params <- function(time, reporter, options) {
             )
         )
         initial_rate <- coef(model)[2]
-    } 
+        initial_rate_model <- model
+    }
 
     # Calculate maximum rate
     if ("Max / Time to max" %in% options) {
@@ -79,17 +80,23 @@ calculate_params <- function(time, reporter, options) {
             reporter = reporter[max_index:length(time)]
         )
         # Remove NAs
-        data <- data[complete.cases(data), ]       
+        data <- data[complete.cases(data), ]
 
-        fit <- nls(reporter ~ SSasymp(time, yf, y0, log_alpha), 
-            data = data)
+        fit <- nls(reporter ~ SSasymp(time, yf, y0, log_alpha),
+            data = data
+        )
 
         decay_rate <- exp(coef(fit)["log_alpha"])
+        decay_rate_model <- fit
     }
 
-    params <- data.frame(
-        Parameter = c("Initial rate", "Maximum", "Time to maximum", "Decay rate"),
-        Value = c(initial_rate, maximum, maximum_time, decay_rate)
+    params <- list(
+        initial_rate = initial_rate,
+        maximum = maximum,
+        maximum_time = maximum_time,
+        decay_rate = decay_rate,
+        initial_rate_model = initial_rate_model,
+        decay_rate_model = decay_rate_model
     )
 }
 
@@ -177,15 +184,53 @@ server <- function(input, output) {
                 geom_line(aes(y = Synthesis), linewidth = 1.1) +
                 labs(x = "Time (hours)", y = "Luminescence (a.u.)") +
                 theme_bw()
+
+            # If we calculated parameters, add them to the plot
+            if (!is.null(dec_env$reactives$params)) {
+                # Maximum
+                maximum <- dec_env$reactives$params[["maximum"]]
+                maximum_time <- dec_env$reactives$params[["maximum_time"]]
+                if (!is.na(maximum) && !is.na(maximum_time)) {
+                    g <- g +
+                        geom_point(aes(x = maximum_time, y = maximum), size = 3, col = "red")
+                }
+
+                # Initial rate
+                initial_rate_model <- dec_env$reactives$params[["initial_rate_model"]]
+                if (!is.null(initial_rate_model)) {
+                    prediction <- predict(initial_rate_model, newdata = data.frame(time = dec_env$reactives$data$Time[1:5]))
+                    new_data <- data.frame(Time = dec_env$reactives$data$Time[1:5], Luminescence = prediction)
+                    g <- g +
+                        geom_line(data = new_data, aes(x = Time, y = Luminescence), col = "orange", lty = "dashed", linewidth = 1.3)
+                }
+
+                # Decay rate
+                decay_rate_model <- dec_env$reactives$params[["decay_rate_model"]]
+                if (!is.null(decay_rate_model)) {
+                    maximum_time <- dec_env$reactives$params[["maximum_time"]]
+                    prediction <- predict(decay_rate_model,
+                        newdata = data.frame(time = dec_env$reactives$data$Time[maximum_time:nrow(dec_env$reactives$data)])
+                    )
+                    new_data <- data.frame(
+                        Time = dec_env$reactives$data$Time[maximum_time:nrow(dec_env$reactives$data)],
+                        Luminescence = prediction
+                    )
+                    g <- g +
+                        geom_line(data = new_data, aes(x = Time, y = Luminescence), col = "#81d100", lty = "dashed", linewidth = 1.3)
+                }
+            }
         }
 
         print(g)
     })
 
     output$params_table <- renderTable({
-        req(dec_env$reactives$deconvoluted)
+        req(dec_env$reactives$params)
 
-        dec_env$reactives$params
+        params <- data.frame(
+            Parameter = c("Initial rate (AU/hour)", "Maximum (AU)", "Time to maximum (hours)", "Decay rate (1/hour)"),
+            Value = unlist(dec_env$reactives$params[1:4])
+        )
     })
 
     # Download deconvoluted data
