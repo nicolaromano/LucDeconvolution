@@ -5,6 +5,9 @@ Implements the idea from [Brown 2008 - Inferring gene expression dynamics from r
 
 Can also calculates initial rate, time to maximum and decay rate of the deconvoluted trace.
 
+# Requirements
+
+R, shiny, shinydashboard, ggplot2, doremi
 # Usage
 
 Requires a CSV file as input formatted with two columns called "Time" and "Luminescence"
