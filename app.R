@@ -54,8 +54,8 @@ calculate_params <- function(time, reporter, points_initial_rate) {
     initial_rate_model <- NA
     maximum <- NA
     maximum_time <- NA
-    decay_rate <- NA
-    decay_rate_model <- NA
+    half_life <- NA
+    half_life_model <- NA
 
     # Calculate initial rate
     model <- lm(reporter ~ time,
@@ -86,8 +86,8 @@ calculate_params <- function(time, reporter, points_initial_rate) {
         fit <- nls(reporter ~ SSasymp(time, yf, y0, log_alpha),
             data = data
         )
-        decay_rate <- exp(coef(fit)["log_alpha"])
-        decay_rate_model <- fit
+        half_life <- log(2)/exp(coef(fit)["log_alpha"])
+        half_life_model <- fit
     })
 
 
@@ -95,9 +95,9 @@ calculate_params <- function(time, reporter, points_initial_rate) {
         initial_rate = initial_rate,
         maximum = maximum,
         maximum_time = maximum_time,
-        decay_rate = decay_rate,
+        half_life = half_life,
         initial_rate_model = initial_rate_model,
-        decay_rate_model = decay_rate_model
+        half_life_model = half_life_model
     )
 
     return(params)
@@ -248,12 +248,12 @@ server <- function(input, output) {
                     geom_line(data = new_data, aes(x = Time, y = Luminescence), col = "orange", linewidth = 1.3)
 
                 # Decay rate
-                decay_rate_model <- dec_env$reactives$params[["decay_rate_model"]]
+                half_life_model <- dec_env$reactives$params[["half_life_model"]]
 
                 maximum_index <- which(dec_env$reactives$data$Time == maximum_time)
 
-                if (length(decay_rate_model)) {
-                    prediction <- predict(decay_rate_model,
+                if (length(half_life_model)) {
+                    prediction <- predict(half_life_model,
                         newdata = data.frame(time = dec_env$reactives$data$Time[maximum_index:nrow(dec_env$reactives$data)])
                     )
                     new_data <- data.frame(
@@ -273,7 +273,7 @@ server <- function(input, output) {
         req(dec_env$reactives$params)
 
         params <- data.frame(
-            Parameter = c("Initial rate (AU/hour)", "Maximum (AU)", "Time to maximum (hours)", "Decay rate (1/hour)"),
+            Parameter = c("Initial rate (AU/hour)", "Maximum (AU)", "Time to maximum (hours)", "Half-life (hours)"),
             Value = unlist(dec_env$reactives$params[1:4])
         )
     })
