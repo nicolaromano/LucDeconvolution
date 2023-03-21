@@ -31,6 +31,8 @@ deconvol <- function(time, reporter, halflife) {
     dBdT <- calculate.gold(time = time, signal = reporter, embedding = 9, n = 2)
     res <- dBdT$dsignal[, 2] + halflife * reporter
 
+    res[res<0] <- 0
+
     res <- data.frame(
         Time = time,
         Luminescence = reporter,
@@ -80,12 +82,14 @@ calculate_params <- function(time, reporter, points_initial_rate) {
     # Remove NAs
     data <- data[complete.cases(data), ]
 
-    fit <- nls(reporter ~ SSasymp(time, yf, y0, log_alpha),
-        data = data
-    )
+    try({
+        fit <- nls(reporter ~ SSasymp(time, yf, y0, log_alpha),
+            data = data
+        )
+        decay_rate <- exp(coef(fit)["log_alpha"])
+        decay_rate_model <- fit
+    })
 
-    decay_rate <- exp(coef(fit)["log_alpha"])
-    decay_rate_model <- fit
 
     params <- list(
         initial_rate = initial_rate,
@@ -137,8 +141,10 @@ server <- function(input, output) {
         dec_env$reactives$deconvoluted <- NULL # Reset deconvoluted data
         dec_env$reactives$original_data <- contents
         if (input$smooth_trace) {
-            dec_env$reactives$data <- data.frame(Time = contents$Time,
-                Luminescence = rollmean(contents$Luminescence, 5, fill = NA))
+            dec_env$reactives$data <- data.frame(
+                Time = contents$Time,
+                Luminescence = rollmean(contents$Luminescence, 5, fill = NA)
+            )
         } else {
             dec_env$reactives$data <- contents
         }
@@ -148,10 +154,12 @@ server <- function(input, output) {
         # Update smoothed data
         req(dec_env$reactives$original_data)
         if (input$smooth_trace) {
-            dec_env$reactives$data <- data.frame(Time = dec_env$reactives$original_data$Time,
-                Luminescence = rollmean(dec_env$reactives$original_data$Luminescence, 5, fill = NA))                
+            dec_env$reactives$data <- data.frame(
+                Time = dec_env$reactives$original_data$Time,
+                Luminescence = rollmean(dec_env$reactives$original_data$Luminescence, 5, fill = NA)
+            )
         } else {
-            dec_env$reactives$data <- dec_env$reactives$original_data            
+            dec_env$reactives$data <- dec_env$reactives$original_data
         }
 
         # Update params, if available
@@ -243,15 +251,18 @@ server <- function(input, output) {
                 decay_rate_model <- dec_env$reactives$params[["decay_rate_model"]]
 
                 maximum_index <- which(dec_env$reactives$data$Time == maximum_time)
-                prediction <- predict(decay_rate_model,
-                    newdata = data.frame(time = dec_env$reactives$data$Time[maximum_index:nrow(dec_env$reactives$data)])
-                )
-                new_data <- data.frame(
-                    Time = dec_env$reactives$data$Time[maximum_index:nrow(dec_env$reactives$data)],
-                    Luminescence = prediction
-                )
-                g <- g +
-                    geom_line(data = new_data, aes(x = Time, y = Luminescence), col = "#81d100", lty = "dashed", linewidth = 1.1)
+
+                if (length(decay_rate_model)) {
+                    prediction <- predict(decay_rate_model,
+                        newdata = data.frame(time = dec_env$reactives$data$Time[maximum_index:nrow(dec_env$reactives$data)])
+                    )
+                    new_data <- data.frame(
+                        Time = dec_env$reactives$data$Time[maximum_index:nrow(dec_env$reactives$data)],
+                        Luminescence = prediction
+                    )
+                    g <- g +
+                        geom_line(data = new_data, aes(x = Time, y = Luminescence), col = "#81d100", lty = "dashed", linewidth = 1.1)
+                }
             }
         }
 
